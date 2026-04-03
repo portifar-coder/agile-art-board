@@ -1,4 +1,4 @@
-# Sterling Financial Holdings — ART Health Board
+# ART Health Board
 
 Real-time Agile Release Train health dashboard pulling live data from Jira Cloud.
 
