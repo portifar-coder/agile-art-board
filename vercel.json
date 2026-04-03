@@ -1,14 +1,5 @@
 {
-  "framework": "vite",
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist",
-  "functions": {
-    "api/jira/[...path].js": {
-      "maxDuration": 30
-    }
-  },
   "rewrites": [
-    { "source": "/api/jira/:path*", "destination": "/api/jira" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    { "source": "/api/jira/:path*", "destination": "/api/jira" }
   ]
 }
