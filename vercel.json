@@ -4,7 +4,12 @@
   "outputDirectory": "dist",
   "functions": {
     "api/jira/[...path].js": {
-      "maxDuration": 30
+      "maxDuration": 30,
+      "runtime": "nodejs20.x"
     }
-  }
+  },
+  "rewrites": [
+    { "source": "/api/jira/(.*)", "destination": "/api/jira/$1" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
 }
