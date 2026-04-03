@@ -8,7 +8,7 @@
     }
   },
   "rewrites": [
-    { "source": "/api/jira/(.*)", "destination": "/api/jira/$1" },
+    { "source": "/api/jira/:path*", "destination": "/api/jira" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
