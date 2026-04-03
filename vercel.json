@@ -5,7 +5,6 @@
   "functions": {
     "api/jira/[...path].js": {
       "maxDuration": 30,
-      "runtime": "nodejs20.x"
     }
   },
   "rewrites": [
