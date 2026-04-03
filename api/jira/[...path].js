@@ -1,26 +1,18 @@
-export default async function handler(req, res) {
-  // CORS headers for preflight
+module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, X-Jira-Domain");
 
-  if (req.method === "OPTIONS") {
-    return res.status(204).end();
-  }
+  if (req.method === "OPTIONS") return res.status(204).end();
 
   const authHeader = req.headers.authorization;
   const jiraDomain = req.headers["x-jira-domain"] || "sterlingbank";
 
-  if (!authHeader) {
-    return res.status(400).json({ error: "Missing Authorization header" });
-  }
+  if (!authHeader) return res.status(400).json({ error: "Missing Authorization header" });
 
-  // Build Jira URL from the catch-all path segments
-  // req.query.path is an array like ["rest", "api", "3", "myself"]
   const pathSegments = req.query.path || [];
   const jiraPath = "/" + pathSegments.join("/");
 
-  // Reconstruct query string (excluding the path param)
   const url = new URL(req.url, "http://localhost");
   url.searchParams.delete("path");
   const queryString = url.searchParams.toString();
@@ -43,12 +35,10 @@ export default async function handler(req, res) {
 
     const contentType = response.headers.get("content-type") || "";
     const body = contentType.includes("json") ? await response.json() : await response.text();
-
     res.status(response.status);
     if (typeof body === "string") res.send(body);
     else res.json(body);
   } catch (err) {
-    console.error("Jira proxy error:", err.message);
     res.status(502).json({ error: "Proxy error: " + err.message });
   }
-}
+};
