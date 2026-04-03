@@ -6,7 +6,7 @@ Real-time Agile Release Train health dashboard pulling live data from Jira Cloud
 
 ### Step 1: Push to GitHub
 ```bash
-cd sterling-art-board
+
 git init
 git add .
 git commit -m "Initial commit"
@@ -29,7 +29,6 @@ git push -u origin main
 1. Open your Vercel URL
 2. Click the **gear icon** (top right)
 3. Enter your Jira details:
-   - **Domain**: `sterlingbank` (pre-filled)
    - **Email**: your Jira account email
    - **API Token**: generate at https://id.atlassian.com/manage-profile/security/api-tokens
 4. Click **Test** → then **Save & Connect**
@@ -39,7 +38,6 @@ No CORS proxy needed — Vercel serverless functions proxy Jira calls server-sid
 ## Local Development
 
 ```bash
-cd sterling-art-board
 npm install
 npm run dev
 ```
