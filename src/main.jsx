@@ -810,14 +810,17 @@ export default function ARTHealthBoard() {
   const [mockData] = useState(() => generateMockData());
   const [piOptions, setPiOptions] = useState([]);
   const [selectedPi, setSelectedPi] = useState("");
-  const [artData, setArtData] = useState({});
   const [allPiData, setAllPiData] = useState({});
   const [modalIssues, setModalIssues] = useState(null);
   const [modalTitle, setModalTitle] = useState("");
+  const [showPiPrompt, setShowPiPrompt] = useState(false);
+  const [rawSprints, setRawSprints] = useState({}); // Sprint lists per ART, stored between phases
+  const [piLoaded, setPiLoaded] = useState(""); // Which PI's data is currently loaded
   const carouselRef = useRef(null);
-  const [carouselIdx, setCarouselIdx] = useState(0);
   const configRef = useRef(config);
   configRef.current = config;
+  const rawSprintsRef = useRef(rawSprints);
+  rawSprintsRef.current = rawSprints;
 
   // Initialize with mock data
   useEffect(() => {
@@ -828,8 +831,8 @@ export default function ARTHealthBoard() {
     }
   }, [useMock, mockData]);
 
-  // Load real data from Jira — accepts config directly to avoid stale closure
-  const loadFromJira = useCallback(async (cfg) => {
+  // ─── PHASE 1: Fetch PIs (sprint lists only) ──────────────────────────────
+  const fetchPIs = useCallback(async (cfg) => {
     const c = cfg || configRef.current;
     if (!c.domain || !c.email || !c.token) {
       setError("Please configure Jira credentials in Settings (domain, email, and API token are all required).");
@@ -839,11 +842,14 @@ export default function ARTHealthBoard() {
     setError(null);
     setProgress("Connecting to Jira...");
     setUseMock(false);
+    setAllPiData({});
+    setPiLoaded("");
+    setSelectedPi("");
+    setShowPiPrompt(false);
 
     try {
       const jira = new JiraService(c.domain, c.email, c.token);
 
-      // Step 1: Test connection
       setProgress("Testing credentials...");
       const me = await jira.testConnection();
       setProgress(`Authenticated as ${me.displayName || me.emailAddress || "OK"}. Fetching sprints...`);
@@ -852,8 +858,8 @@ export default function ARTHealthBoard() {
       const piSet = new Set();
       let fetchedCount = 0;
       let failedBoards = [];
+      const currentYear = new Date().getFullYear().toString();
 
-      // Step 2: Fetch sprints from first board of each ART
       for (const art of ALL_ARTS) {
         const boardId = art.boards[0];
         fetchedCount++;
@@ -863,7 +869,7 @@ export default function ARTHealthBoard() {
           allSprints[art.key] = sprints;
           sprints.forEach(s => {
             const pi = parsePIFromSprint(s.name);
-            if (pi) piSet.add(pi);
+            if (pi && pi.includes(currentYear)) piSet.add(pi);
           });
         } catch (e) {
           failedBoards.push({ art: art.name, board: boardId, error: e.message });
@@ -873,9 +879,6 @@ export default function ARTHealthBoard() {
 
       if (failedBoards.length === ALL_ARTS.length) {
         const firstErr = failedBoards[0]?.error || "Unknown error";
-        if (firstErr.includes("CORS_BLOCKED")) {
-          throw new Error("All requests failed. Ensure the dev server is running (npm run dev) and try again.");
-        }
         if (firstErr.includes("AUTH_FAILED")) {
           throw new Error("Authentication failed for all boards. Double-check your email and API token in Settings.");
         }
@@ -885,85 +888,20 @@ export default function ARTHealthBoard() {
       const piList = Array.from(piSet).sort();
       if (piList.length === 0) {
         throw new Error(
-          `Connected successfully but no PIs found. Sprints may not match the expected naming pattern "PI X YYYY - Sprint N". ` +
+          `Connected successfully but no PIs found for ${currentYear}. Sprints may not match the naming pattern "PI X ${currentYear} - Sprint N". ` +
           `${failedBoards.length > 0 ? `${failedBoards.length} boards also failed to load.` : ""}`
         );
       }
 
+      // Store sprint data for Phase 2
+      setRawSprints(allSprints);
+      rawSprintsRef.current = allSprints;
       setPiOptions(piList);
-      const activePi = piList[piList.length - 1] || "";
-      setSelectedPi(activePi);
-
-      // Step 3: For each PI, fetch issues
-      const piData = {};
-      let totalSprints = 0;
-      let sprintsDone = 0;
-
-      // Count total sprints first
-      for (const pi of piList) {
-        for (const art of ALL_ARTS) {
-          totalSprints += (allSprints[art.key] || []).filter(s => parsePIFromSprint(s.name) === pi).length;
-        }
-      }
-
-      for (const pi of piList) {
-        piData[pi] = {};
-        for (const art of ALL_ARTS) {
-          const sprints = (allSprints[art.key] || []).filter(s => parsePIFromSprint(s.name) === pi);
-          const sprintsWithEpics = [];
-          for (const sprint of sprints) {
-            sprintsDone++;
-            setProgress(`Loading epics: ${art.short} / ${sprint.name.replace(/.*-\s*/, "").trim()} (${sprintsDone}/${totalSprints})`);
-            try {
-              const issues = await jira.getSprintIssues(sprint.id, art.key);
-              const epics = issues.map(iss => ({
-                key: iss.key,
-                summary: iss.fields?.summary || "",
-                status: iss.fields?.status?.name || "Unknown",
-                requestType: iss.fields?.[REQUEST_TYPE_FIELD]?.value || iss.fields?.[REQUEST_TYPE_FIELD] || "N/A",
-                timeInStatus: {},
-              }));
-
-              // Fetch changelog for bottleneck (only for active sprint to limit API calls)
-              if (sprint.state === "active" && epics.length > 0) {
-                setProgress(`Loading bottleneck data: ${art.short} (${Math.min(epics.length, 20)} epics)...`);
-                for (const epic of epics.slice(0, 20)) {
-                  try {
-                    const histories = await jira.getIssueChangelog(epic.key);
-                    const statusTimes = {};
-                    let lastStatusChange = null;
-                    for (const h of histories) {
-                      for (const item of h.items || []) {
-                        if (item.field === "status") {
-                          if (lastStatusChange && item.fromString) {
-                            const from = new Date(lastStatusChange);
-                            const to = new Date(h.created);
-                            const hours = (to - from) / 3600000;
-                            statusTimes[item.fromString] = (statusTimes[item.fromString] || 0) + hours;
-                          }
-                          lastStatusChange = h.created;
-                        }
-                      }
-                    }
-                    epic.timeInStatus = statusTimes;
-                  } catch (e) { /* skip individual changelog failures */ }
-                }
-              }
-
-              sprintsWithEpics.push({ ...sprint, epics });
-            } catch (e) {
-              sprintsWithEpics.push({ ...sprint, epics: [] });
-            }
-          }
-          piData[pi][art.key] = sprintsWithEpics;
-        }
-      }
-
-      setAllPiData(piData);
       setProgress("");
+      setShowPiPrompt(true); // Show prompt to select PI
 
       if (failedBoards.length > 0) {
-        setError(`Loaded successfully but ${failedBoards.length} board(s) failed: ${failedBoards.map(f => f.art).join(", ")}. Check board IDs.`);
+        setError(`Connected but ${failedBoards.length} board(s) failed: ${failedBoards.map(f => f.art).join(", ")}. Check board IDs.`);
       }
     } catch (e) {
       setError(e.message);
@@ -973,14 +911,109 @@ export default function ARTHealthBoard() {
     setLoading(false);
   }, []);
 
-  // Save config and auto-trigger load
+  // ─── PHASE 2: Load data for selected PI ───────────────────────────────────
+  const loadPIData = useCallback(async (pi) => {
+    const c = configRef.current;
+    const allSprints = rawSprintsRef.current;
+    if (!c.domain || !c.email || !c.token || !pi) return;
+    if (!allSprints || Object.keys(allSprints).length === 0) {
+      setError("No sprint data available. Click Sync Jira first.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setProgress(`Loading data for ${pi}...`);
+    setShowPiPrompt(false);
+
+    try {
+      const jira = new JiraService(c.domain, c.email, c.token);
+      const piData = {};
+      piData[pi] = {};
+
+      let totalSprints = 0;
+      let sprintsDone = 0;
+
+      // Count sprints for this PI
+      for (const art of ALL_ARTS) {
+        totalSprints += (allSprints[art.key] || []).filter(s => parsePIFromSprint(s.name) === pi).length;
+      }
+
+      for (const art of ALL_ARTS) {
+        const sprints = (allSprints[art.key] || []).filter(s => parsePIFromSprint(s.name) === pi);
+        const sprintsWithEpics = [];
+        for (const sprint of sprints) {
+          sprintsDone++;
+          setProgress(`Loading epics: ${art.short} / ${sprint.name.replace(/.*-\s*/, "").trim()} (${sprintsDone}/${totalSprints})`);
+          try {
+            const issues = await jira.getSprintIssues(sprint.id, art.key);
+            const epics = issues.map(iss => ({
+              key: iss.key,
+              summary: iss.fields?.summary || "",
+              status: iss.fields?.status?.name || "Unknown",
+              requestType: iss.fields?.[REQUEST_TYPE_FIELD]?.value || iss.fields?.[REQUEST_TYPE_FIELD] || "N/A",
+              timeInStatus: {},
+            }));
+
+            // Fetch changelog for bottleneck (only for active sprint to limit API calls)
+            if (sprint.state === "active" && epics.length > 0) {
+              setProgress(`Loading bottleneck data: ${art.short} (${Math.min(epics.length, 20)} epics)...`);
+              for (const epic of epics.slice(0, 20)) {
+                try {
+                  const histories = await jira.getIssueChangelog(epic.key);
+                  const statusTimes = {};
+                  let lastStatusChange = null;
+                  for (const h of histories) {
+                    for (const item of h.items || []) {
+                      if (item.field === "status") {
+                        if (lastStatusChange && item.fromString) {
+                          const from = new Date(lastStatusChange);
+                          const to = new Date(h.created);
+                          const hours = (to - from) / 3600000;
+                          statusTimes[item.fromString] = (statusTimes[item.fromString] || 0) + hours;
+                        }
+                        lastStatusChange = h.created;
+                      }
+                    }
+                  }
+                  epic.timeInStatus = statusTimes;
+                } catch (e) { /* skip individual changelog failures */ }
+              }
+            }
+
+            sprintsWithEpics.push({ ...sprint, epics });
+          } catch (e) {
+            sprintsWithEpics.push({ ...sprint, epics: [] });
+          }
+        }
+        piData[pi][art.key] = sprintsWithEpics;
+      }
+
+      setAllPiData(piData);
+      setPiLoaded(pi);
+      setProgress("");
+    } catch (e) {
+      setError(e.message);
+      setProgress("");
+    }
+    setLoading(false);
+  }, []);
+
+  // When user selects a PI from dropdown, load its data
+  const handlePiSelect = useCallback((pi) => {
+    setSelectedPi(pi);
+    if (pi && pi !== piLoaded && !useMock) {
+      loadPIData(pi);
+    }
+  }, [piLoaded, useMock, loadPIData]);
+
+  // Save config and auto-trigger PI fetch
   const handleSaveConfig = useCallback((newConfig) => {
     setConfig(newConfig);
     configRef.current = newConfig;
     setShowSettings(false);
-    // Auto-trigger load with the new config directly
-    setTimeout(() => loadFromJira(newConfig), 100);
-  }, [loadFromJira]);
+    setTimeout(() => fetchPIs(newConfig), 100);
+  }, [fetchPIs]);
 
   // Current PI data
   const currentPiData = useMemo(() => allPiData[selectedPi] || {}, [allPiData, selectedPi]);
@@ -1054,14 +1087,27 @@ export default function ARTHealthBoard() {
             </div>
           )}
           {loading && <Loader2 size={16} className="spin" style={{ color: theme.accent, animation: "spin 1s linear infinite" }} />}
-          <button onClick={() => loadFromJira()} disabled={loading || !config.domain}
+          <button onClick={() => fetchPIs()} disabled={loading || !config.domain}
             style={{ padding: "6px 12px", background: theme.surface, border: `1px solid ${theme.cardBorder}`, borderRadius: 8, color: theme.textMuted, cursor: config.domain ? "pointer" : "not-allowed", fontSize: 11, display: "flex", alignItems: "center", gap: 5, fontWeight: 600 }}>
             <RefreshCw size={12} /> Sync Jira
           </button>
-          <select value={selectedPi} onChange={e => setSelectedPi(e.target.value)}
-            style={{ padding: "6px 12px", background: theme.surface, border: `1px solid ${theme.cardBorder}`, borderRadius: 8, color: theme.text, fontSize: 12, fontWeight: 600, cursor: "pointer", outline: "none" }}>
-            {piOptions.map(pi => <option key={pi} value={pi}>{pi}</option>)}
-          </select>
+          <div style={{ position: "relative" }}>
+            <select value={selectedPi} onChange={e => handlePiSelect(e.target.value)} disabled={piOptions.length === 0 || loading}
+              style={{ padding: "6px 12px", background: showPiPrompt ? theme.accent : theme.surface, border: `1px solid ${showPiPrompt ? theme.accent : theme.cardBorder}`, borderRadius: 8, color: showPiPrompt ? "#fff" : theme.text, fontSize: 12, fontWeight: 600, cursor: piOptions.length > 0 ? "pointer" : "not-allowed", outline: "none", animation: showPiPrompt ? "pulse 1.5s ease-in-out infinite" : "none" }}>
+              {!selectedPi && <option value="">— Select PI —</option>}
+              {piOptions.map(pi => <option key={pi} value={pi}>{pi}</option>)}
+            </select>
+            {showPiPrompt && (
+              <div style={{
+                position: "absolute", top: "100%", right: 0, marginTop: 8, padding: "10px 14px",
+                background: theme.accent, color: "#fff", borderRadius: 10, fontSize: 12, fontWeight: 600,
+                whiteSpace: "nowrap", zIndex: 200, boxShadow: "0 4px 20px rgba(14,165,233,0.4)",
+              }}>
+                <div style={{ position: "absolute", top: -6, right: 16, width: 12, height: 12, background: theme.accent, transform: "rotate(45deg)" }} />
+                Select a PI to load the dashboard
+              </div>
+            )}
+          </div>
           <button onClick={() => setShowSettings(true)}
             style={{ width: 34, height: 34, borderRadius: 8, background: theme.surface, border: `1px solid ${theme.cardBorder}`, color: theme.textMuted, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <Settings size={16} />
@@ -1146,6 +1192,7 @@ export default function ARTHealthBoard() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');
         @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(14,165,233,0.4); } 50% { box-shadow: 0 0 0 8px rgba(14,165,233,0); } }
         * { box-sizing: border-box; }
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
