@@ -1,4 +1,7 @@
 {
+  "framework": null,
+  "buildCommand": "npx vite build",
+  "outputDirectory": "dist",
   "rewrites": [
     { "source": "/api/jira/:path*", "destination": "/api/jira" }
   ]
