@@ -106,6 +106,7 @@ class JiraService {
       const jql = encodeURIComponent(`project=${projectKey} AND issuetype=Epic AND sprint=${sprintId}`);
       const fields = `key,summary,status,${REQUEST_TYPE_FIELD}`;
       const data = await this.apiFetch(`/rest/api/3/search?jql=${jql}&fields=${fields}&maxResults=100&startAt=${startAt}`);
+      console.log(`[JiraService] Sprint ${sprintId} / ${projectKey}: found ${data.total || 0} epics`);
       allIssues.push(...(data.issues || []));
       total = data.total || 0;
       startAt += 100;
@@ -861,28 +862,37 @@ export default function ARTHealthBoard() {
       const currentYear = new Date().getFullYear().toString();
 
       for (const art of ALL_ARTS) {
-        const boardId = art.boards[0];
         fetchedCount++;
-        setProgress(`Fetching sprints: ${art.name} (${fetchedCount}/${ALL_ARTS.length})...`);
-        try {
-          const sprints = await jira.getBoardSprints(boardId);
-          allSprints[art.key] = sprints;
-          sprints.forEach(s => {
-            const pi = parsePIFromSprint(s.name);
-            if (pi && pi.includes(currentYear)) piSet.add(pi);
-          });
-        } catch (e) {
-          failedBoards.push({ art: art.name, board: boardId, error: e.message });
-          console.warn(`Failed: ${art.key} board ${boardId}:`, e);
+        const sprintMap = {}; // Deduplicate sprints by ID across all boards
+        
+        for (let bi = 0; bi < art.boards.length; bi++) {
+          const boardId = art.boards[bi];
+          setProgress(`Fetching sprints: ${art.name} board ${bi + 1}/${art.boards.length} (ART ${fetchedCount}/${ALL_ARTS.length})...`);
+          try {
+            const sprints = await jira.getBoardSprints(boardId);
+            sprints.forEach(s => {
+              if (!sprintMap[s.id]) sprintMap[s.id] = s; // Deduplicate by sprint ID
+            });
+          } catch (e) {
+            failedBoards.push({ art: art.name, board: boardId, error: e.message });
+            console.warn(`Failed: ${art.key} board ${boardId}:`, e);
+          }
         }
+
+        const dedupedSprints = Object.values(sprintMap);
+        allSprints[art.key] = dedupedSprints;
+        dedupedSprints.forEach(s => {
+          const pi = parsePIFromSprint(s.name);
+          if (pi && pi.includes(currentYear)) piSet.add(pi);
+        });
       }
 
-      if (failedBoards.length === ALL_ARTS.length) {
+      if (Object.values(allSprints).every(arr => arr.length === 0)) {
         const firstErr = failedBoards[0]?.error || "Unknown error";
         if (firstErr.includes("AUTH_FAILED")) {
           throw new Error("Authentication failed for all boards. Double-check your email and API token in Settings.");
         }
-        throw new Error(`All ${ALL_ARTS.length} boards failed. First error: ${firstErr}`);
+        throw new Error(`No sprints found across any boards. First error: ${firstErr}`);
       }
 
       const piList = Array.from(piSet).sort();
