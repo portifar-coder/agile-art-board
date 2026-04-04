@@ -98,20 +98,16 @@ class JiraService {
     return allSprints;
   }
 
-  async getSprintIssues(sprintId, projectKey) {
-    const allIssues = [];
-    let startAt = 0;
-    let total = 1;
-    while (startAt < total) {
-      const jql = encodeURIComponent(`project=${projectKey} AND issuetype=Epic AND sprint=${sprintId}`);
-      const fields = `key,summary,status,${REQUEST_TYPE_FIELD}`;
-      const data = await this.apiFetch(`/rest/api/3/search?jql=${jql}&fields=${fields}&maxResults=100&startAt=${startAt}`);
-      console.log(`[JiraService] Sprint ${sprintId} / ${projectKey}: found ${data.total || 0} epics`);
-      allIssues.push(...(data.issues || []));
-      total = data.total || 0;
-      startAt += 100;
+async apiPost(path, body) {
+    const url = `/api/jira${path}`;
+    const res = await fetch(url, { method: "POST", headers: this.headers, body });
+    if (res.status === 401) throw new Error("AUTH_FAILED: Invalid email or API token.");
+    if (res.status === 403) throw new Error("FORBIDDEN: API token lacks permission.");
+    if (!res.ok) {
+      let b = ""; try { b = await res.text(); } catch(e) {}
+      throw new Error(`Jira API error ${res.status}: ${b.slice(0, 200)}`);
     }
-    return allIssues;
+    return res.json();
   }
 
   async getIssueChangelog(issueKey) {
