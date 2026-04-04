@@ -98,7 +98,24 @@ class JiraService {
     return allSprints;
   }
 
-async apiPost(path, body) {
+async getSprintIssues(sprintId, projectKey) {
+    const allIssues = [];
+    let startAt = 0;
+    let total = 1;
+    while (startAt < total) {
+      const jql = `project=${projectKey} AND issuetype=Epic AND sprint=${sprintId}`;
+      const fields = `key,summary,status,${REQUEST_TYPE_FIELD}`;
+      const body = JSON.stringify({ jql, fields: fields.split(","), maxResults: 100, startAt });
+      const data = await this.apiPost(`/rest/api/3/search/jql`, body);
+      console.log(`[JiraService] Sprint ${sprintId} / ${projectKey}: found ${data.total || 0} epics`);
+      allIssues.push(...(data.issues || []));
+      total = data.total || 0;
+      startAt += 100;
+    }
+    return allIssues;
+  }
+
+  async apiPost(path, body) {
     const url = `/api/jira${path}`;
     const res = await fetch(url, { method: "POST", headers: this.headers, body });
     if (res.status === 401) throw new Error("AUTH_FAILED: Invalid email or API token.");
