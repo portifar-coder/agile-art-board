@@ -103,7 +103,7 @@ class JiraService {
     let startAt = 0;
     let total = 1;
     while (startAt < total) {
-      const jql = encodeURIComponent(`project=${projectKey} AND issuetype=Epic AND sprint=${sprintId}`);
+      const jql = encodeURIComponent(`project="${projectKey}" AND issuetype=Epic AND sprint=${sprintId}`);
       const fields = `key,summary,status,${REQUEST_TYPE_FIELD}`;
       const data = await this.apiFetch(`/rest/api/3/search/jql?jql=${jql}&fields=${fields}&maxResults=100&startAt=${startAt}`);
       console.log(`[JiraService] Sprint ${sprintId} / ${projectKey}: found ${data.total || 0} epics`);
