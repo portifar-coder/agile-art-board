@@ -41,7 +41,7 @@ const ART_CONFIG = {
 };
 
 const UNPLANNED_TYPES = ["Production Fix", "Regulatory request", "ISG Vulnerability Fix"];
-const REQUEST_TYPE_FIELD = "customfield_10010";
+const REQUEST_TYPE_FIELD = "customfield_10507";
 const BOTTLENECK_STATUSES = [
   "Ready for coding","Coding in progress","In review","Ready for QA",
   "Deployed to QA","Functional testing","Security testing","QA completed",
