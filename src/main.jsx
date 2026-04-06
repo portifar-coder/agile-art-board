@@ -470,30 +470,87 @@ function SummaryPanel({ title, bankColor, trendData, type, onClick }) {
 }
 
 function IssueModal({ issues, title, onClose }) {
+  const [tab, setTab] = useState("all");
   if (!issues) return null;
+
+  const delivered = issues.filter(e => (e.status || "").toLowerCase() === "deployed to prod");
+  const unplanned = issues.filter(e => UNPLANNED_TYPES.some(t => t.toLowerCase() === (e.requestType || "").toLowerCase()));
+  const plannedOnly = issues.filter(e => !UNPLANNED_TYPES.some(t => t.toLowerCase() === (e.requestType || "").toLowerCase()));
+
+  const tabs = [
+    { key: "all", label: "All", count: issues.length, color: theme.text },
+    { key: "planned", label: "Planned", count: issues.length, color: theme.accent },
+    { key: "delivered", label: "Delivered", count: delivered.length, color: theme.success },
+    { key: "unplanned", label: "Unplanned", count: unplanned.length, color: theme.warning },
+    { key: "plannedOnly", label: "Planned (excl. unplanned)", count: plannedOnly.length, color: theme.purple },
+  ];
+
+  const filtered = tab === "delivered" ? delivered : tab === "unplanned" ? unplanned : tab === "plannedOnly" ? plannedOnly : issues;
+
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: theme.card, border: `1px solid ${theme.cardBorder}`, borderRadius: 16, padding: 24, maxWidth: 800, width: "90%", maxHeight: "80vh", overflow: "auto" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: theme.card, border: `1px solid ${theme.cardBorder}`, borderRadius: 16, padding: 24, maxWidth: 900, width: "95%", maxHeight: "85vh", overflow: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h3 style={{ color: theme.text, margin: 0, fontSize: 16 }}>{title}</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", color: theme.textMuted, cursor: "pointer", padding: 4 }}><X size={18} /></button>
         </div>
+
+        {/* Summary counts */}
+        <div style={{ display: "flex", gap: 16, marginBottom: 16, padding: "12px 16px", background: theme.surface, borderRadius: 10 }}>
+          {[
+            { label: "Planned (All)", val: issues.length, color: theme.accent },
+            { label: "Delivered", val: delivered.length, color: theme.success },
+            { label: "Unplanned", val: unplanned.length, color: theme.warning },
+            { label: "Delivery %", val: issues.length > 0 ? Math.round((delivered.length / issues.length) * 100) + "%" : "0%", color: delivered.length / issues.length >= 0.8 ? theme.success : delivered.length / issues.length >= 0.5 ? theme.warning : theme.danger },
+          ].map(({ label, val, color }) => (
+            <div key={label} style={{ textAlign: "center", flex: 1 }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color }}>{val}</div>
+              <div style={{ fontSize: 10, color: theme.textDim, textTransform: "uppercase" }}>{label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: "flex", gap: 4, marginBottom: 12, overflowX: "auto" }}>
+          {tabs.map(t => (
+            <button key={t.key} onClick={() => setTab(t.key)} style={{
+              padding: "6px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap",
+              background: tab === t.key ? `${t.color}22` : theme.surface,
+              color: tab === t.key ? t.color : theme.textMuted,
+              borderBottom: tab === t.key ? `2px solid ${t.color}` : "2px solid transparent",
+            }}>
+              {t.label} ({t.count})
+            </button>
+          ))}
+        </div>
+
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
-            <tr>{["Key","Summary","Status","Request Type"].map(h => (
+            <tr>{["Key","Summary","Status","Request Type","Category"].map(h => (
               <th key={h} style={{ padding: "8px 10px", textAlign: "left", color: theme.textMuted, borderBottom: `1px solid ${theme.cardBorder}`, fontWeight: 600 }}>{h}</th>
             ))}</tr>
           </thead>
-          <tbody>{issues.map(issue => (
-            <tr key={issue.key} style={{ borderBottom: `1px solid ${theme.cardBorder}22` }}>
-              <td style={{ padding: "7px 10px", color: theme.accent, fontFamily: "monospace" }}>{issue.key}</td>
-              <td style={{ padding: "7px 10px", color: theme.text }}>{issue.summary}</td>
-              <td style={{ padding: "7px 10px" }}><StatusBadge status={issue.status} /></td>
-              <td style={{ padding: "7px 10px", color: theme.textMuted }}>{issue.requestType}</td>
-            </tr>
-          ))}</tbody>
+          <tbody>{filtered.map(issue => {
+            const isDelivered = (issue.status || "").toLowerCase() === "deployed to prod";
+            const isUnplanned = UNPLANNED_TYPES.some(t => t.toLowerCase() === (issue.requestType || "").toLowerCase());
+            return (
+              <tr key={issue.key} style={{ borderBottom: `1px solid ${theme.cardBorder}22` }}>
+                <td style={{ padding: "7px 10px", color: theme.accent, fontFamily: "monospace" }}>{issue.key}</td>
+                <td style={{ padding: "7px 10px", color: theme.text, maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{issue.summary}</td>
+                <td style={{ padding: "7px 10px" }}><StatusBadge status={issue.status} /></td>
+                <td style={{ padding: "7px 10px", color: theme.textMuted }}>{issue.requestType}</td>
+                <td style={{ padding: "7px 10px" }}>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {isDelivered && <span style={{ padding: "1px 6px", borderRadius: 4, fontSize: 9, fontWeight: 600, background: `${theme.success}22`, color: theme.success }}>Delivered</span>}
+                    {isUnplanned && <span style={{ padding: "1px 6px", borderRadius: 4, fontSize: 9, fontWeight: 600, background: `${theme.warning}22`, color: theme.warning }}>Unplanned</span>}
+                    {!isUnplanned && <span style={{ padding: "1px 6px", borderRadius: 4, fontSize: 9, fontWeight: 600, background: `${theme.accent}22`, color: theme.accent }}>Planned</span>}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}</tbody>
         </table>
-        {issues.length === 0 && <p style={{ color: theme.textDim, textAlign: "center", padding: 24 }}>No issues found</p>}
+        {filtered.length === 0 && <p style={{ color: theme.textDim, textAlign: "center", padding: 24 }}>No issues in this category</p>}
       </div>
     </div>
   );
@@ -1046,6 +1103,8 @@ export default function ARTHealthBoard() {
   function getSummaryTrend(bankKey) {
     const arts = ART_CONFIG[bankKey].arts;
     const sprintMap = {};
+    const bankLabel = ART_CONFIG[bankKey].label;
+    
     for (const art of arts) {
       const sprints = currentPiData[art.key] || [];
       for (const s of sprints) {
@@ -1058,7 +1117,22 @@ export default function ARTHealthBoard() {
         sprintMap[label].epics.push(...s.epics);
       }
     }
-    return Object.values(sprintMap).sort(sortBySprint);
+
+    // Verification logging
+    const result = Object.values(sprintMap).sort(sortBySprint);
+    console.group(`📊 ${bankLabel} — Summary Breakdown`);
+    for (const sprint of result) {
+      const deliveredEpics = sprint.epics.filter(e => (e.status || "").toLowerCase() === "deployed to prod");
+      const unplannedEpics = sprint.epics.filter(e => UNPLANNED_TYPES.some(t => t.toLowerCase() === (e.requestType || "").toLowerCase()));
+      console.group(`${sprint.name}: Planned=${sprint.planned}, Delivered=${sprint.delivered}, Unplanned=${sprint.unplanned}`);
+      console.log("All epics:", sprint.epics.map(e => `${e.key} | Status: "${e.status}" | Type: "${e.requestType}"`));
+      console.log("Delivered (status = 'deployed to prod'):", deliveredEpics.map(e => `${e.key} "${e.status}"`));
+      console.log("Unplanned (Production Fix / Regulatory / ISG):", unplannedEpics.map(e => `${e.key} "${e.requestType}"`));
+      console.groupEnd();
+    }
+    console.groupEnd();
+
+    return result;
   }
 
   function getOpenSprintIssues(bankKey) {
