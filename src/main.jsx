@@ -1012,62 +1012,100 @@ export default function ARTHealthBoard() {
       const piData = {};
       piData[pi] = {};
 
-      let totalSprints = 0;
-      let sprintsDone = 0;
-
-      // Count sprints for this PI
       for (const art of ALL_ARTS) {
-        totalSprints += (allSprints[art.key] || []).filter(s => parsePIFromSprint(s.name) === pi).length;
-      }
+        const rawPiSprints = (allSprints[art.key] || []).filter(s => parsePIFromSprint(s.name) === pi);
 
-      for (const art of ALL_ARTS) {
-        const sprints = (allSprints[art.key] || []).filter(s => parsePIFromSprint(s.name) === pi);
-        const sprintsWithEpics = [];
-        for (const sprint of sprints) {
-          sprintsDone++;
-          setProgress(`Loading epics: ${art.short} / ${cleanSprintName(sprint.name)} (${sprintsDone}/${totalSprints})`);
-          try {
-            const issues = await jira.getSprintIssues(sprint.id, art.key);
-            const epics = issues.map(iss => ({
-              key: iss.key,
-              summary: iss.fields?.summary || "",
-              status: iss.fields?.status?.name || "Unknown",
-              requestType: iss.fields?.[REQUEST_TYPE_FIELD]?.value || iss.fields?.[REQUEST_TYPE_FIELD] || "N/A",
-              timeInStatus: {},
-            }));
+        // Group sprints by cleaned name (e.g., "Sprint 1") across all boards
+        const sprintGroups = {};
+        for (const sprint of rawPiSprints) {
+          const cleanName = cleanSprintName(sprint.name);
+          if (!sprintGroups[cleanName]) {
+            sprintGroups[cleanName] = {
+              ids: [],
+              name: sprint.name,
+              cleanName,
+              // active if ANY board has it active
+              state: sprint.state,
+            };
+          }
+          sprintGroups[cleanName].ids.push(sprint.id);
+          // Promote state: active > closed > future
+          if (sprint.state === "active") sprintGroups[cleanName].state = "active";
+          else if (sprint.state === "closed" && sprintGroups[cleanName].state !== "active") sprintGroups[cleanName].state = "closed";
+        }
 
-            // Fetch changelog for bottleneck (only for active sprint to limit API calls)
-            if (sprint.state === "active" && epics.length > 0) {
-              setProgress(`Loading bottleneck data: ${art.short} (${Math.min(epics.length, 20)} epics)...`);
-              for (const epic of epics.slice(0, 20)) {
-                try {
-                  const histories = await jira.getIssueChangelog(epic.key);
-                  const statusTimes = {};
-                  let lastStatusChange = null;
-                  for (const h of histories) {
-                    for (const item of h.items || []) {
-                      if (item.field === "status") {
-                        if (lastStatusChange && item.fromString) {
-                          const from = new Date(lastStatusChange);
-                          const to = new Date(h.created);
-                          const hours = (to - from) / 3600000;
-                          statusTimes[item.fromString.toLowerCase()] = (statusTimes[item.fromString.toLowerCase()] || 0) + hours;
-                        }
-                        lastStatusChange = h.created;
+        const groupList = Object.values(sprintGroups).sort((a, b) => parseSprintNumber(a.cleanName) - parseSprintNumber(b.cleanName));
+        const consolidatedSprints = [];
+        let groupsDone = 0;
+
+        for (const group of groupList) {
+          groupsDone++;
+          setProgress(`Loading epics: ${art.short} / ${group.cleanName} (${groupsDone}/${groupList.length})...`);
+
+          // Fetch epics from ALL sprint IDs in this group, deduplicate by key
+          const epicMap = {};
+          for (const sprintId of group.ids) {
+            try {
+              const issues = await jira.getSprintIssues(sprintId, art.key);
+              for (const iss of issues) {
+                if (!epicMap[iss.key]) {
+                  const rtField = iss.fields?.[REQUEST_TYPE_FIELD];
+                  const rtValue = rtField?.value || rtField?.name || (typeof rtField === "string" ? rtField : null) || "N/A";
+                  // Log first epic's raw field to verify structure
+                  if (Object.keys(epicMap).length === 0) {
+                    console.log(`[RequestType Debug] ${art.key} ${group.cleanName} first epic ${iss.key}:`, JSON.stringify(rtField));
+                  }
+                  epicMap[iss.key] = {
+                    key: iss.key,
+                    summary: iss.fields?.summary || "",
+                    status: iss.fields?.status?.name || "Unknown",
+                    requestType: rtValue,
+                    timeInStatus: {},
+                  };
+                }
+              }
+            } catch (e) {
+              console.warn(`Failed epics for ${art.key} sprint ${sprintId}:`, e.message);
+            }
+          }
+
+          const epics = Object.values(epicMap);
+
+          // Fetch changelog for bottleneck (only for active sprint to limit API calls)
+          if (group.state === "active" && epics.length > 0) {
+            setProgress(`Loading bottleneck data: ${art.short} / ${group.cleanName} (${Math.min(epics.length, 20)} epics)...`);
+            for (const epic of epics.slice(0, 20)) {
+              try {
+                const histories = await jira.getIssueChangelog(epic.key);
+                const statusTimes = {};
+                let lastStatusChange = null;
+                for (const h of histories) {
+                  for (const item of h.items || []) {
+                    if (item.field === "status") {
+                      if (lastStatusChange && item.fromString) {
+                        const from = new Date(lastStatusChange);
+                        const to = new Date(h.created);
+                        const hours = (to - from) / 3600000;
+                        statusTimes[item.fromString.toLowerCase()] = (statusTimes[item.fromString.toLowerCase()] || 0) + hours;
                       }
+                      lastStatusChange = h.created;
                     }
                   }
-                  epic.timeInStatus = statusTimes;
-                } catch (e) { /* skip individual changelog failures */ }
-              }
+                }
+                epic.timeInStatus = statusTimes;
+              } catch (e) { /* skip individual changelog failures */ }
             }
-
-            sprintsWithEpics.push({ ...sprint, epics });
-          } catch (e) {
-            sprintsWithEpics.push({ ...sprint, epics: [] });
           }
+
+          consolidatedSprints.push({
+            id: group.ids[0], // Use first ID as representative
+            name: group.name,
+            state: group.state,
+            epics,
+          });
         }
-        piData[pi][art.key] = sprintsWithEpics;
+
+        piData[pi][art.key] = consolidatedSprints;
       }
 
       setAllPiData(piData);
