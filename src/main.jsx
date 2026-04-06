@@ -105,7 +105,7 @@ class JiraService {
     while (startAt < total) {
       const jql = encodeURIComponent(`project=${projectKey} AND issuetype=Epic AND sprint=${sprintId}`);
       const fields = `key,summary,status,${REQUEST_TYPE_FIELD}`;
-      const data = await this.apiFetch(`/rest/api/3/jql?jql=${jql}&fields=${fields}&maxResults=100&startAt=${startAt}`);
+      const data = await this.apiFetch(`/rest/api/3/search/jql?jql=${jql}&fields=${fields}&maxResults=100&startAt=${startAt}`);
       console.log(`[JiraService] Sprint ${sprintId} / ${projectKey}: found ${data.total || 0} epics`);
       allIssues.push(...(data.issues || []));
       total = data.total || 0;
@@ -124,25 +124,15 @@ class JiraService {
 function parsePIFromSprint(sprintName) {
   const match = sprintName.match(/^(PI\s*\d+\s+\d{4})/i);
   if (!match) return null;
-  // Normalize: "PI1 2026" → "PI 1 2026", "PI  2  2026" → "PI 2 2026"
   return match[1]
-    .replace(/^PI\s*/i, "PI ")  // Ensure space after PI
-    .replace(/\s+/g, " ")       // Collapse multiple spaces
+    .replace(/^PI\s*/i, "PI ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
 function cleanSprintName(sprintName) {
-  // Extract "Sprint N" from any format:
-  // "PI 1 2026 - Sprint 3" → "Sprint 3"
-  // "PI 1 2026, Sprint 3" → "Sprint 3"  
-  // "PI1 2026 Sprint 3"   → "Sprint 3"
-  // "sprint 3"            → "Sprint 3"
   const match = sprintName.match(/(sprint\s*\d+)/i);
-  if (match) {
-    // Normalize: capitalize "Sprint", ensure space before number
-    return match[1].replace(/sprint\s*/i, "Sprint ");
-  }
-  // Fallback: strip PI prefix if present, then trim separators
+  if (match) return match[1].replace(/sprint\s*/i, "Sprint ");
   return sprintName
     .replace(/^PI\s*\d+\s+\d{4}\s*[-,.:]\s*/i, "")
     .replace(/^PI\s*\d+\s+\d{4}\s+/i, "")
@@ -1235,4 +1225,3 @@ export default function ARTHealthBoard() {
 
 // ─── RENDER ────────────────────────────────────────────────────────────────
 createRoot(document.getElementById("root")).render(<ARTHealthBoard />);
-
