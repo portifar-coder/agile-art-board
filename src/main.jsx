@@ -41,7 +41,7 @@ const ART_CONFIG = {
 };
 
 const UNPLANNED_TYPES = ["Production Fix", "Regulatory request", "ISG Vulnerability Fix"];
-const REQUEST_TYPE_FIELD = "customfield_10507";
+const REQUEST_TYPE_FIELD = "customfield_10010";
 const BOTTLENECK_STATUSES = [
   "Ready for coding","Coding in progress","In review","Ready for QA",
   "Deployed to QA","Functional testing","Security testing","QA completed",
@@ -98,14 +98,14 @@ class JiraService {
     return allSprints;
   }
 
-async getSprintIssues(sprintId, projectKey) {
+  async getSprintIssues(sprintId, projectKey) {
     const allIssues = [];
     let startAt = 0;
     let total = 1;
     while (startAt < total) {
       const jql = encodeURIComponent(`project=${projectKey} AND issuetype=Epic AND sprint=${sprintId}`);
       const fields = `key,summary,status,${REQUEST_TYPE_FIELD}`;
-      const data = await this.apiFetch(`/rest/api/3/search/jql?jql=${jql}&fields=${fields}&maxResults=100&startAt=${startAt}`);
+      const data = await this.apiFetch(`/rest/api/3/search?jql=${jql}&fields=${fields}&maxResults=100&startAt=${startAt}`);
       console.log(`[JiraService] Sprint ${sprintId} / ${projectKey}: found ${data.total || 0} epics`);
       allIssues.push(...(data.issues || []));
       total = data.total || 0;
@@ -114,22 +114,48 @@ async getSprintIssues(sprintId, projectKey) {
     return allIssues;
   }
 
-
   async getIssueChangelog(issueKey) {
     const data = await this.apiFetch(`/rest/api/3/issue/${issueKey}?expand=changelog`);
     return data.changelog?.histories || [];
   }
 }
 
-// ─── PI PARSING ──────────────────────────────────────────────────────────────
+// ─── PI & SPRINT PARSING ─────────────────────────────────────────────────────
 function parsePIFromSprint(sprintName) {
   const match = sprintName.match(/^(PI\s*\d+\s+\d{4})/i);
-  return match ? match[1].replace(/\s+/g, " ").trim() : null;
+  if (!match) return null;
+  // Normalize: "PI1 2026" → "PI 1 2026", "PI  2  2026" → "PI 2 2026"
+  return match[1]
+    .replace(/^PI\s*/i, "PI ")  // Ensure space after PI
+    .replace(/\s+/g, " ")       // Collapse multiple spaces
+    .trim();
+}
+
+function cleanSprintName(sprintName) {
+  // Extract "Sprint N" from any format:
+  // "PI 1 2026 - Sprint 3" → "Sprint 3"
+  // "PI 1 2026, Sprint 3" → "Sprint 3"  
+  // "PI1 2026 Sprint 3"   → "Sprint 3"
+  // "sprint 3"            → "Sprint 3"
+  const match = sprintName.match(/(sprint\s*\d+)/i);
+  if (match) {
+    // Normalize: capitalize "Sprint", ensure space before number
+    return match[1].replace(/sprint\s*/i, "Sprint ");
+  }
+  // Fallback: strip PI prefix if present, then trim separators
+  return sprintName
+    .replace(/^PI\s*\d+\s+\d{4}\s*[-,.:]\s*/i, "")
+    .replace(/^PI\s*\d+\s+\d{4}\s+/i, "")
+    .trim() || sprintName;
 }
 
 function parseSprintNumber(sprintName) {
-  const match = sprintName.match(/Sprint\s+(\d+)/i);
+  const match = sprintName.match(/Sprint\s*(\d+)/i);
   return match ? parseInt(match[1]) : 0;
+}
+
+function sortBySprint(a, b) {
+  return parseSprintNumber(a.name) - parseSprintNumber(b.name);
 }
 
 // ─── MOCK DATA GENERATOR ────────────────────────────────────────────────────
@@ -189,17 +215,13 @@ function getSprintTrendData(sprints) {
   return sprints.map(s => {
     const m = calcMetrics(s.epics);
     return {
-      name: s.name.replace(/.*-\s*/, ""),
-      planned: m.planned, // All epics
+      name: cleanSprintName(s.name),
+      planned: m.planned,
       delivered: m.delivered,
       unplanned: m.unplanned,
       state: s.state,
     };
-  }).sort((a, b) => {
-    const na = parseInt(a.name.replace(/\D/g, "")) || 0;
-    const nb = parseInt(b.name.replace(/\D/g, "")) || 0;
-    return na - nb;
-  });
+  }).sort(sortBySprint);
 }
 
 function calcBottleneck(epics) {
@@ -220,7 +242,7 @@ function calcDeliveryAggregates(allPiData, artKey, currentPi) {
       const m = calcMetrics(sprint.epics);
       rows.push({
         pi,
-        sprint: sprint.name.replace(/.*-\s*/, "").trim(),
+        sprint: cleanSprintName(sprint.name),
         total: m.total,
         delivered: m.delivered,
         pct: m.total > 0 ? Math.round((m.delivered / m.total) * 100) : 0,
@@ -525,7 +547,7 @@ function ARTColumn({ art, sprints, allPiData, currentPi }) {
           </div>
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 10, color: theme.textDim }}>OPEN SPRINT</div>
-            <div style={{ fontSize: 11, color: theme.textMuted, fontWeight: 600 }}>{openSprint?.name?.replace(/.*-\s*/, "") || "N/A"}</div>
+            <div style={{ fontSize: 11, color: theme.textMuted, fontWeight: 600 }}>{openSprint ? cleanSprintName(openSprint.name) : "N/A"}</div>
           </div>
         </div>
         <div style={{ display: "flex", gap: 16, marginTop: 12 }}>
@@ -955,7 +977,7 @@ export default function ARTHealthBoard() {
         const sprintsWithEpics = [];
         for (const sprint of sprints) {
           sprintsDone++;
-          setProgress(`Loading epics: ${art.short} / ${sprint.name.replace(/.*-\s*/, "").trim()} (${sprintsDone}/${totalSprints})`);
+          setProgress(`Loading epics: ${art.short} / ${cleanSprintName(sprint.name)} (${sprintsDone}/${totalSprints})`);
           try {
             const issues = await jira.getSprintIssues(sprint.id, art.key);
             const epics = issues.map(iss => ({
@@ -1036,7 +1058,7 @@ export default function ARTHealthBoard() {
     for (const art of arts) {
       const sprints = currentPiData[art.key] || [];
       for (const s of sprints) {
-        const label = s.name.replace(/.*-\s*/, "").trim();
+        const label = cleanSprintName(s.name);
         if (!sprintMap[label]) sprintMap[label] = { name: label, planned: 0, delivered: 0, unplanned: 0, epics: [] };
         const m = calcMetrics(s.epics);
         sprintMap[label].planned += m.planned;
@@ -1045,11 +1067,7 @@ export default function ARTHealthBoard() {
         sprintMap[label].epics.push(...s.epics);
       }
     }
-    return Object.values(sprintMap).sort((a, b) => {
-      const na = parseInt(a.name.replace(/\D/g, "")) || 0;
-      const nb = parseInt(b.name.replace(/\D/g, "")) || 0;
-      return na - nb;
-    });
+    return Object.values(sprintMap).sort(sortBySprint);
   }
 
   function getOpenSprintIssues(bankKey) {
