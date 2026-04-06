@@ -195,9 +195,9 @@ function generateMockData() {
 // ─── METRIC CALCULATIONS ─────────────────────────────────────────────────────
 function calcMetrics(epics) {
   const total = epics.length;
-  const delivered = epics.filter(e => e.status === "Deployed to prod").length;
-  const planned = total; // Planned = ALL open sprint epics
-  const unplanned = epics.filter(e => UNPLANNED_TYPES.includes(e.requestType)).length;
+  const delivered = epics.filter(e => (e.status || "").toLowerCase() === "deployed to prod").length;
+  const planned = total;
+  const unplanned = epics.filter(e => UNPLANNED_TYPES.some(t => t.toLowerCase() === (e.requestType || "").toLowerCase())).length;
   return { total, delivered, planned, unplanned };
 }
 
@@ -216,7 +216,8 @@ function getSprintTrendData(sprints) {
 
 function calcBottleneck(epics) {
   return BOTTLENECK_STATUSES.map(status => {
-    const times = epics.map(e => e.timeInStatus?.[status] || 0).filter(t => t > 0);
+    const key = status.toLowerCase();
+    const times = epics.map(e => e.timeInStatus?.[key] || 0).filter(t => t > 0);
     const avg = times.length ? times.reduce((a, b) => a + b, 0) / times.length : 0;
     return { status: status.length > 14 ? status.slice(0, 13) + "…" : status, fullStatus: status, hours: Math.round(avg * 10) / 10 };
   });
@@ -513,8 +514,8 @@ function ARTColumn({ art, sprints, allPiData, currentPi }) {
   const openSprint = sprints.find(s => s.state === "active") || sprints[sprints.length - 1];
   const trendData = getSprintTrendData(sprints);
   const epics = openSprint?.epics || [];
-  const planned = epics.filter(e => !UNPLANNED_TYPES.includes(e.requestType));
-  const unplanned = epics.filter(e => UNPLANNED_TYPES.includes(e.requestType));
+  const planned = epics.filter(e => !UNPLANNED_TYPES.some(t => t.toLowerCase() === (e.requestType || "").toLowerCase()));
+  const unplanned = epics.filter(e => UNPLANNED_TYPES.some(t => t.toLowerCase() === (e.requestType || "").toLowerCase()));
   const bottleneckData = calcBottleneck(epics);
   const deliveryRows = calcDeliveryAggregates(allPiData, art.key, currentPi);
   const m = calcMetrics(epics);
@@ -993,7 +994,7 @@ export default function ARTHealthBoard() {
                           const from = new Date(lastStatusChange);
                           const to = new Date(h.created);
                           const hours = (to - from) / 3600000;
-                          statusTimes[item.fromString] = (statusTimes[item.fromString] || 0) + hours;
+                          statusTimes[item.fromString.toLowerCase()] = (statusTimes[item.fromString.toLowerCase()] || 0) + hours;
                         }
                         lastStatusChange = h.created;
                       }
