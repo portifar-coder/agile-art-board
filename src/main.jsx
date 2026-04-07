@@ -936,21 +936,35 @@ export default function ARTHealthBoard() {
         fetchedCount++;
         const sprintMap = {}; // Deduplicate sprints by ID across all boards
         
+        console.group(`🔄 Phase 1: ${art.key} (${art.boards.length} boards)`);
         for (let bi = 0; bi < art.boards.length; bi++) {
           const boardId = art.boards[bi];
           setProgress(`Fetching sprints: ${art.name} board ${bi + 1}/${art.boards.length} (ART ${fetchedCount}/${ALL_ARTS.length})...`);
           try {
             const sprints = await jira.getBoardSprints(boardId);
+            const piSprints = sprints.filter(s => parsePIFromSprint(s.name) && parsePIFromSprint(s.name).includes(currentYear));
+            const nonPiSprints = sprints.filter(s => !parsePIFromSprint(s.name) || !parsePIFromSprint(s.name).includes(currentYear));
+            console.log(`  Board ${boardId}: ${sprints.length} total sprints, ${piSprints.length} match PI ${currentYear}`);
+            if (piSprints.length > 0) {
+              console.log(`    PI sprints:`, piSprints.map(s => `${s.name} [${s.state}] (ID: ${s.id})`));
+            }
+            if (nonPiSprints.length > 0) {
+              console.log(`    Non-PI sprints (excluded):`, nonPiSprints.map(s => s.name).slice(0, 10), nonPiSprints.length > 10 ? `...+${nonPiSprints.length - 10} more` : "");
+            }
             sprints.forEach(s => {
-              if (!sprintMap[s.id]) sprintMap[s.id] = s; // Deduplicate by sprint ID
+              if (!sprintMap[s.id]) sprintMap[s.id] = s;
             });
           } catch (e) {
             failedBoards.push({ art: art.name, board: boardId, error: e.message });
-            console.warn(`Failed: ${art.key} board ${boardId}:`, e);
+            console.warn(`  Board ${boardId}: FAILED — ${e.message}`);
           }
         }
 
         const dedupedSprints = Object.values(sprintMap);
+        const dedupedPiSprints = dedupedSprints.filter(s => parsePIFromSprint(s.name) && parsePIFromSprint(s.name).includes(currentYear));
+        console.log(`  TOTAL after dedup: ${dedupedSprints.length} sprints, ${dedupedPiSprints.length} match PI ${currentYear}`);
+        console.groupEnd();
+
         allSprints[art.key] = dedupedSprints;
         dedupedSprints.forEach(s => {
           const pi = parsePIFromSprint(s.name);
@@ -1035,6 +1049,14 @@ export default function ARTHealthBoard() {
         }
 
         const groupList = Object.values(sprintGroups).sort((a, b) => parseSprintNumber(a.cleanName) - parseSprintNumber(b.cleanName));
+        
+        // Diagnostic: log sprint consolidation for this ART
+        console.group(`🔍 ${art.key} — Sprint Consolidation`);
+        for (const g of groupList) {
+          console.log(`${g.cleanName} [${g.state}]: ${g.ids.length} board sprint(s) → IDs: [${g.ids.join(", ")}]`);
+        }
+        console.groupEnd();
+
         const consolidatedSprints = [];
         let groupsDone = 0;
 
@@ -1047,14 +1069,11 @@ export default function ARTHealthBoard() {
           for (const sprintId of group.ids) {
             try {
               const issues = await jira.getSprintIssues(sprintId, art.key);
+              console.log(`  ${art.key} ${group.cleanName} sprint ID ${sprintId}: ${issues.length} epics returned`);
               for (const iss of issues) {
                 if (!epicMap[iss.key]) {
                   const rtField = iss.fields?.[REQUEST_TYPE_FIELD];
                   const rtValue = rtField?.value || rtField?.name || (typeof rtField === "string" ? rtField : null) || "N/A";
-                  // Log first epic's raw field to verify structure
-                  if (Object.keys(epicMap).length === 0) {
-                    console.log(`[RequestType Debug] ${art.key} ${group.cleanName} first epic ${iss.key}:`, JSON.stringify(rtField));
-                  }
                   epicMap[iss.key] = {
                     key: iss.key,
                     summary: iss.fields?.summary || "",
@@ -1070,6 +1089,8 @@ export default function ARTHealthBoard() {
           }
 
           const epics = Object.values(epicMap);
+          console.log(`  ${art.key} ${group.cleanName} TOTAL after dedup: ${epics.length} epics → ` +
+            epics.map(e => `${e.key} [${e.status}] (${e.requestType})`).join(", "));
 
           // Fetch changelog for bottleneck (only for active sprint to limit API calls)
           if (group.state === "active" && epics.length > 0) {
