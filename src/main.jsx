@@ -11,9 +11,9 @@ const ART_CONFIG = {
     arts: [
       { name: "Backoffice ART", short: "BOA", key: "BOA", boards: [114,113,111,104,417,112] },
       { name: "Digital Channels ART", short: "DCAF", key: "DCAF", boards: [128,93,92,70,94,71,72,91,218] },
-      { name: "Digital Lending ART", short: "DLSA", key: "DLSA", boards: [181,188,187] },
+      { name: "Digital Lending ART", short: "DLSA", key: "DLSA", boards: [204,158,681,212,156] },
       { name: "Investment Solutions ART", short: "ISAB", key: "ISAB", boards: [131,219,116,285] },
-      { name: "Integration & Partnerships ART", short: "IN", key: "IN", boards: [215,814,135] },
+      { name: "Integration & Partnerships ART", short: "IN", key: "IN", boards: [215,135] },
       { name: "Feature Channels ART", short: "FTC", key: "FTC", boards: [96] },
     ],
   },
@@ -23,7 +23,7 @@ const ART_CONFIG = {
     arts: [
       { name: "Backoffice ART", short: "BAT", key: "BAT", boards: [155] },
       { name: "Digital Channels ART", short: "DCAB", key: "DCAB", boards: [163,176,173,169,175] },
-      { name: "Digital Lending ART", short: "DLSTA", key: "DLSTA", boards: [204,158,681,159,212] },
+      { name: "Digital Lending ART", short: "DLSTA", key: "DLSTA", boards: [181,188,187] },
       { name: "Investment Solutions ART", short: "IST", key: "IST", boards: [195,196] },
       { name: "Integration & Partnerships ART", short: "IPT", key: "IPT", boards: [193] },
       { name: "Feature Channels ART", short: "FEAT", key: "FEAT", boards: [211] },
