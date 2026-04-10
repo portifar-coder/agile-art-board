@@ -568,9 +568,23 @@ function StatusBadge({ status }) {
 }
 
 function ARTColumn({ art, sprints, allPiData, currentPi }) {
-  const openSprint = sprints.find(s => s.state === "active") || sprints[sprints.length - 1];
+  // Combine ALL active sprints — different boards may be on different sprint numbers
+  const activeSprints = sprints.filter(s => s.state === "active");
+  const openSprintLabel = activeSprints.length > 0
+    ? activeSprints.map(s => cleanSprintName(s.name)).filter((v, i, a) => a.indexOf(v) === i).join(", ")
+    : "N/A";
+  
   const trendData = getSprintTrendData(sprints);
-  const epics = openSprint?.epics || [];
+  
+  // Collect epics from ALL active sprints, deduplicate by key
+  const epicMap = {};
+  for (const s of activeSprints) {
+    for (const e of (s.epics || [])) {
+      if (!epicMap[e.key]) epicMap[e.key] = e;
+    }
+  }
+  const epics = Object.values(epicMap);
+  
   const planned = epics.filter(e => !UNPLANNED_TYPES.some(t => t.toLowerCase() === (e.requestType || "").toLowerCase()));
   const unplanned = epics.filter(e => UNPLANNED_TYPES.some(t => t.toLowerCase() === (e.requestType || "").toLowerCase()));
   const bottleneckData = calcBottleneck(epics);
@@ -594,8 +608,8 @@ function ARTColumn({ art, sprints, allPiData, currentPi }) {
             <div style={{ fontSize: 11, color: art.bankColor, fontWeight: 600, marginTop: 2 }}>{art.bankLabel}</div>
           </div>
           <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 10, color: theme.textDim }}>OPEN SPRINT</div>
-            <div style={{ fontSize: 11, color: theme.textMuted, fontWeight: 600 }}>{openSprint ? cleanSprintName(openSprint.name) : "N/A"}</div>
+            <div style={{ fontSize: 10, color: theme.textDim }}>ACTIVE SPRINT{activeSprints.length > 1 ? "S" : ""}</div>
+            <div style={{ fontSize: 11, color: theme.textMuted, fontWeight: 600 }}>{openSprintLabel}</div>
           </div>
         </div>
         <div style={{ display: "flex", gap: 16, marginTop: 12 }}>
@@ -1196,13 +1210,18 @@ export default function ARTHealthBoard() {
 
   function getOpenSprintIssues(bankKey) {
     const arts = ART_CONFIG[bankKey].arts;
-    const issues = [];
+    const epicMap = {};
     for (const art of arts) {
       const sprints = currentPiData[art.key] || [];
-      const open = sprints.find(s => s.state === "active");
-      if (open) issues.push(...open.epics);
+      for (const s of sprints) {
+        if (s.state === "active") {
+          for (const e of (s.epics || [])) {
+            if (!epicMap[e.key]) epicMap[e.key] = e;
+          }
+        }
+      }
     }
-    return issues;
+    return Object.values(epicMap);
   }
 
   // Carousel scroll
